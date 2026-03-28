@@ -1,3 +1,0 @@
-[tool.pyre]
-source_directories = ["."]
-search_path = [".venv/Lib/site-packages", "C:/Users/dell/AppData/Local/Python/pythoncore-3.14-64/lib/site-packages"]

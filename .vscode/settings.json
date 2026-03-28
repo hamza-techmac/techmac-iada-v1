@@ -1,7 +1,0 @@
-{
-    "python.defaultInterpreterPath": "D:\\IADA\\V1\\Streamlet\\techmac-iada-v1\\.venv\\Scripts\\python.exe",
-    "python.analysis.extraPaths": [
-        "D:\\IADA\\V1\\Streamlet\\techmac-iada-v1\\.venv\\Lib\\site-packages"
-    ],
-    "python.languageServer": "Default"
-}
