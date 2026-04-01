@@ -1095,7 +1095,7 @@ else:
         st.divider()
         st.subheader("General Ledger (GL) Report")
         
-        gl_file_path = "Crown_GL_Report.csv"
+        gl_file_path = os.path.join("utils", "Crown_GL_Report.csv")
         
         col_gl1, col_gl2 = st.columns([2, 1])
         with col_gl1:
