@@ -10,17 +10,32 @@ st.markdown("""
 <style>
 [data-testid="collapsedControl"] { display: none; }
 .metric-tile {
-    border: 2px solid #ddd;
-    border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    padding: 10px;
-    margin: 5px auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    padding: 15px;
     background-color: white;
-    width: 260px;
-    height: 120px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
+    min-height: 90px;
+    margin-bottom: 10px;
+}
+.metric-tile h3 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #1f1f1f;
+}
+.metric-tile h4 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+.metric-tile h6 {
+    margin: 5px 0 0 0;
+    font-size: 0.9rem;
+    color: #666;
+    font-weight: 500;
 }
 .footer {
     position: fixed;
@@ -91,8 +106,8 @@ else:
 
     st.divider()
 
-    tab_dashboard, tab_monthly, tab_weekly, tab_upload = st.tabs([
-        "Dashboard", "Monthly Analysis", "Weekly Analysis", "Add Sales Stats"
+    tab_dashboard, tab_monthly, tab_weekly, tab_upload, tab_accounts = st.tabs([
+        "Dashboard", "Monthly Analysis", "Weekly Analysis", "Add Sales Stats", "Accounts"
     ])
 
     with tab_dashboard:
@@ -1045,6 +1060,91 @@ else:
                     "total_sales": total_sales,
                     "user": st.session_state.get("username")
                 })
+
+    with tab_accounts:
+        st.subheader("Chart of Accounts")
+        st.write("This tab displays the system Chart of Accounts across Revenue and Expense categories.")
+        
+        accounts_data = [
+            ["Revenue", 1, "Own", "Income from sales"],
+            ["Revenue", 2, "Own", "Income from sales"],
+            ["Revenue", 3, "Telephone", "Income from sales"],
+            ["Revenue", 4, "Web", "Income from sales"],
+            ["Revenue", 5, "JustEat", "Income from sales"],
+            ["Revenue", 6, "JustEat", "Income from sales"],
+            ["Revenue", 7, "Deliveroo", "Income from sales"],
+            ["Revenue", 8, "Uber", "Income from sales"],
+            ["Direct Expense", 101, "Cost of Sales", "COS"],
+            ["Direct Expense", 102, "Cost of Labour", "COL"],
+            ["Operating Expense", 103, "Admin Exp", "Admin"],
+            ["Operating Expense", 104, "AD - Deliveroo", "Marketing"],
+            ["Operating Expense", 105, "AD - Uber", "Marketing"],
+            ["Operating Expense", 106, "AD - JE", "Marketing"],
+            ["Operating Expense", 107, "AD - Google", "Marketing"],
+            ["Operating Expense", 108, "AD - Fb/Tiktok", "Marketing"],
+            ["Direct Expense", 109, "Sale - Deliveroo", "Sale"],
+            ["Direct Expense", 110, "Sale - Uber", "Sale"],
+            ["Direct Expense", 111, "Sale - JE", "Sale"],
+        ]
+        
+        accounts_df = pd.DataFrame(accounts_data, columns=["Account_Type", "Account_Code", "Account_Name", "Description"])
+        st.dataframe(accounts_df, use_container_width=True, hide_index=True)
+
+        # --- GL Report (Consolidated) ---
+        st.divider()
+        st.subheader("General Ledger (GL) Report")
+        
+        gl_file_path = "Crown_GL_Report.csv"
+        
+        col_gl1, col_gl2 = st.columns([2, 1])
+        with col_gl1:
+            st.info(f"Upload a new GL CSV export, or the system will automatically read from:\n`{gl_file_path}`")
+        with col_gl2:
+            uploaded_gl = st.file_uploader("Upload GL Data", type=["csv", "tsv", "txt"], label_visibility="collapsed")
+            
+        gl_df = None
+        
+        if uploaded_gl is not None:
+            try:
+                gl_df = pd.read_csv(uploaded_gl, sep=None, engine="python")
+            except Exception as e:
+                st.error(f"Failed to read uploaded file: {e}")
+        elif os.path.exists(gl_file_path):
+            try:
+                gl_df = pd.read_csv(gl_file_path, sep=None, engine="python")
+            except Exception as e:
+                st.error(f"Failed to read local file '{gl_file_path}': {e}")
+                
+        if gl_df is not None and not gl_df.empty:
+            if "Transaction_Date" in gl_df.columns:
+                gl_df["Transaction_Date"] = pd.to_datetime(gl_df["Transaction_Date"]).dt.date
+            
+            # Filters
+            st.write("### Filters")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                start_date = st.date_input("Start Date", value=gl_df["Transaction_Date"].min() if "Transaction_Date" in gl_df.columns else pd.to_datetime("today"))
+        with col_f2:
+            end_date = st.date_input("End Date", value=gl_df["Transaction_Date"].max())
+            
+            filtered_gl = gl_df
+            if "Transaction_Date" in gl_df.columns:
+                filtered_gl = gl_df[
+                    (gl_df["Transaction_Date"] >= start_date) & 
+                    (gl_df["Transaction_Date"] <= end_date)
+                ]
+            
+            st.dataframe(
+                filtered_gl, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Credit": st.column_config.NumberColumn(format="£%,.2f"),
+                    "Debit": st.column_config.NumberColumn(format="£%,.2f")
+                }
+            )
+        else:
+            st.warning("No GL Data available. Please upload a structured file to view transactions.")
 
 # --- GLOBAL FOOTER ---
 st.markdown("""
