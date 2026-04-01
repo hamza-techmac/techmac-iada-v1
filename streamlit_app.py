@@ -1124,8 +1124,11 @@ else:
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 start_date = st.date_input("Start Date", value=gl_df["Transaction_Date"].min() if "Transaction_Date" in gl_df.columns else pd.to_datetime("today"))
-        with col_f2:
-            end_date = st.date_input("End Date", value=gl_df["Transaction_Date"].max())
+            with col_f2:
+                end_date = st.date_input(
+                    "End Date", 
+                    value=gl_df["Transaction_Date"].max() if "Transaction_Date" in gl_df.columns else pd.to_datetime("today")
+                )
             
             filtered_gl = gl_df
             if "Transaction_Date" in gl_df.columns:
