@@ -907,7 +907,11 @@ with tab_weekly:
 
         # Normalize data (Year-Week combination)
         if "Year" in df_w.columns and "Week" in df_w.columns:
-            df_w["week_label"] = df_w["Year"].astype(str) + "-" + df_w["Week"].astype(str).str.zfill(2)
+            # Display format: "Week 01 (2026)" or simply "Week 01" if single year
+            df_w["week_label"] = "Week " + df_w["Week"].astype(str).str.zfill(2)
+            if df_w["Year"].nunique() > 1:
+                df_w["week_label"] += " (" + df_w["Year"].astype(str) + ")"
+            
             df_w["sort_key"] = df_w["Year"] * 100 + df_w["Week"].astype(int)
             df_w = df_w.sort_values("sort_key")
 
@@ -928,24 +932,35 @@ with tab_weekly:
 
         # Analytics Views
         st.divider()
-        wr1, wr2 = st.columns(2)
-        with wr1:
-            st.subheader("1️⃣ Weekly Sales vs. Expenses")
-            import plotly.graph_objects as go
-            fig = go.Figure()
-            for i, sk in enumerate(filt_s):
-                fig.add_trace(go.Bar(name=w_map[sk], x=curr_w["week_label"], y=curr_w[sk], offsetgroup=0, marker_color=px.colors.qualitative.Plotly[i % 10]))
-            for i, ek in enumerate(filt_e):
-                fig.add_trace(go.Bar(name=w_map[ek], x=curr_w["week_label"], y=curr_w[ek], offsetgroup=1, marker_opacity=0.7, marker_color=px.colors.qualitative.Pastel[i % 10]))
-            fig.update_layout(barmode='stack', title="Weekly Cashflow Comparison", legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
-            st.plotly_chart(fig, use_container_width=True)
-        with wr2:
-            st.subheader("2️⃣ Performance Index (WoW)")
-            lk = [k for k in ["Total_Revenue", "Total_Expenses", "Weekly_Net_Profit"] if k in curr_w.columns]
-            if lk:
-                fig_l = px.line(curr_w, x="week_label", y=lk, markers=True, labels={k: w_map[k] for k in lk}, color_discrete_map={"Total_Revenue": "#3498db", "Total_Expenses": "#e74c3c", "Weekly_Net_Profit": "#27ae60"})
-                fig_l.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
-                st.plotly_chart(fig_l, use_container_width=True)
+        st.subheader("1️⃣ Weekly Sales vs. Expenses")
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        for i, sk in enumerate(filt_s):
+            fig.add_trace(go.Bar(name=w_map[sk], x=curr_w["week_label"], y=curr_w[sk], offsetgroup=0, marker_color=px.colors.qualitative.Plotly[i % 10]))
+        for i, ek in enumerate(filt_e):
+            fig.add_trace(go.Bar(name=w_map[ek], x=curr_w["week_label"], y=curr_w[ek], offsetgroup=1, marker_opacity=0.7, marker_color=px.colors.qualitative.Pastel[i % 10]))
+        fig.update_layout(
+            barmode='stack', 
+            title="Weekly Cashflow Comparison", 
+            height=500,
+            xaxis_title="Weeks",
+            legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.write("") # Spacer
+        st.subheader("2️⃣ Performance Index (WoW)")
+        lk = [k for k in ["Total_Revenue", "Total_Expenses", "Weekly_Net_Profit"] if k in curr_w.columns]
+        if lk:
+            fig_l = px.line(curr_w, x="week_label", y=lk, markers=True, 
+                            labels={k: w_map[k] for k in lk}, 
+                            color_discrete_map={"Total_Revenue": "#3498db", "Total_Expenses": "#e74c3c", "Weekly_Net_Profit": "#27ae60"})
+            fig_l.update_layout(
+                height=500,
+                xaxis_title="Weeks",
+                legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
+            )
+            st.plotly_chart(fig_l, use_container_width=True)
 
         st.divider()
         st.subheader("📊 Profitability Diagnostics")
