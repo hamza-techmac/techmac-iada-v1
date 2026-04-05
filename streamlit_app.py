@@ -657,7 +657,13 @@ with tab_monthly:
             sel_b_name = global_sel
             sel_b_id = next((b["id"] for b in live_branches if b["branch_name"] == global_sel), live_branches[0]["id"])
             
-        st.subheader(f"📊 Market Trend & Profitability: {sel_b_name}")
+        m_col1, m_col2 = st.columns([8, 2])
+        with m_col1:
+            st.subheader(f"📊 Market Trend & Profitability: {sel_b_name}")
+        with m_col2:
+            if st.button("🔄 Refresh Data", key="refresh_monthly", use_container_width=True):
+                get_branch_monthly_performance.clear()
+                st.rerun()
 
         # --- Sales API Logic ---
         # --- Branch Monthly Performance API Logic ---
@@ -877,7 +883,14 @@ with tab_weekly:
             sel_b_name = global_sel
             sel_b_id = next((b["id"] for b in live_branches if b["branch_name"] == global_sel), live_branches[0]["id"])
             
-        st.subheader(f"📊 Weekly Market Trend: {sel_b_name}")
+        w_col1, w_col2 = st.columns([8, 2])
+        with w_col1:
+            st.subheader(f"📊 Weekly Market Trend: {sel_b_name}")
+        with w_col2:
+            if st.button("🔄 Refresh Data", key="refresh_weekly", use_container_width=True):
+                from services.api_client import get_branch_weekly_performance
+                get_branch_weekly_performance.clear()
+                st.rerun()
 
         # --- Fetch Data ---
         from services.api_client import get_branch_weekly_performance
