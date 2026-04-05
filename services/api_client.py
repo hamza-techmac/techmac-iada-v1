@@ -139,7 +139,7 @@ def login(username, password) -> dict | None:
 # READ endpoints  (cached for 5 minutes to reduce API calls on reruns)
 # ---------------------------------------------------------------------------
 
-# @st.cache_data(ttl=1, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_branches() -> list[dict]:
     """Return list of active branches from /branches/"""
     # Debug: Check headers being sent
@@ -149,21 +149,21 @@ def get_branches() -> list[dict]:
     return data if data else []
 
 
-# @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_channels() -> list[dict]:
     """Return list of channels from /channels/"""
     data = _get("/channels/")
     return data if data else []
 
 
-# @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_franchises() -> list[dict]:
     """Return list of franchises from /franchises/"""
     data = _get("/franchises/")
     return data if data else []
 
 
-# @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_cities() -> list[dict]:
     """Return list of cities from /cities/"""
     data = _get("/cities/")
@@ -235,7 +235,7 @@ def get_branch_performance(branch_id: int = None) -> dict | None:
     return data
 
 
-# @st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_branch_analytics(branch_id: int = None) -> list[dict] | None:
     """
     Return detailed analytics for a specific branch from /reports/branch-analytics.
@@ -244,7 +244,7 @@ def get_branch_analytics(branch_id: int = None) -> list[dict] | None:
     data = _get("/reports/branch-analytics", branch_id=branch_id)
     return data
 
-# @st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_branch_monthly_performance(branch_id: int = None) -> list[dict]:
     """
     Detailed monthly P&L trend from /reports/branch-monthly-performance/{branch_id}.
@@ -253,7 +253,7 @@ def get_branch_monthly_performance(branch_id: int = None) -> list[dict]:
     data = _get(f"/reports/branch-monthly-performance/{branch_id}", branch_id=branch_id)
     return data if data else []
 
-# @st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_branch_weekly_performance(branch_id: int = None) -> list[dict]:
     """
     Detailed weekly P&L trend from /reports/branch-weekly-performance/{branch_id}.
