@@ -40,8 +40,12 @@ def _get(path: str, branch_id: int = None, params: dict = None) -> list | dict |
         params["branch_id"] = branch_id
     
     try:
+        url = f"{BASE_URL}{path}"
+        # Console Log for Debugging
+        print(f"DEBUG API CALL: GET {url} | Params: {params}")
+        
         resp = requests.get(
-            f"{BASE_URL}{path}",
+            url,
             headers=_get_headers(branch_id),
             params=params,
             timeout=10

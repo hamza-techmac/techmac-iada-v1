@@ -190,11 +190,22 @@ if st.session_state["authentication_status"] is not True:
     show_login_ui()
     st.stop()
 
+import re
+
 # --- ROLE PERMISSIONS ---
 # role_id == 1: Admin
 # role_id == 2: Manager (Franchise Owner)
 # role_id == 3: Data Analyst
 user_role = st.session_state.get("role_id", 0)
+
+def extract_branch_id(display_str: str) -> int | None:
+    """Extracts the integer ID from a 'Name (ID: XX)' string with robust regex."""
+    if not display_str or display_str == "All Branches":
+        return None
+    # Flexible regex to handle spaces
+    match = re.search(r"\(ID:\s*(\d+)\s*\)", display_str)
+    res = int(match.group(1)) if match else None
+    return res
 
 def get_allowed_branches(all_branches: list) -> list:
     """Filters branches based on the user's role."""
@@ -249,9 +260,32 @@ with col_selector:
     st.write("") # Spacer
     # We fetch allowed branches globally here to use across the dashboard
     all_allowed_branches = get_allowed_branches(get_branches())
-    branch_names = [b["branch_name"] for b in all_allowed_branches]
-    if branch_names:
-        selected_dashboard_branch = st.selectbox("Filter Branch", options=["All Branches"] + branch_names, key="global_branch_filter")
+    # Create a robust display options list: "Branch Name (ID: XX)"
+    branch_display_options = [f"{b['branch_name']} (ID: {b['id']})" for b in all_allowed_branches]
+    
+    def on_branch_change():
+        # Clear all cached API data when branch selection changes
+        st.cache_data.clear()
+        if "trigger_gl" in st.session_state:
+            st.session_state["trigger_gl"] = False
+
+    if branch_display_options:
+        selected_dashboard_branch = st.selectbox(
+            "Filter Branch", 
+            options=["All Branches"] + branch_display_options, 
+            key="global_branch_filter",
+            on_change=on_branch_change
+        )
+        # Verify the selected ID mapping
+        with st.sidebar:
+            st.write("---")
+            st.write("**Active Selection Details**")
+            if selected_dashboard_branch != "All Branches":
+                match = next((b for b in all_allowed_branches if f"{b['branch_name']} (ID: {b['id']})" == selected_dashboard_branch), None)
+                if match:
+                    st.success(f"Selected: {match['branch_name']}\nID: {match['id']}")
+            else:
+                st.info("Showing Aggregated View")
     else:
         st.warning("No branches accessible")
         selected_dashboard_branch = "None"
@@ -461,7 +495,16 @@ with tab_dashboard:
         st.warning("No branches accessible")
         st.stop()
     
-    selected_dashboard_branch = st.session_state.get("global_branch_filter", "All Branches")
+    selected_display = st.session_state.get("global_branch_filter", "All Branches")
+    # Resolve the ID using robust regex extraction
+    selected_b_id = extract_branch_id(selected_display)
+    
+    if selected_b_id:
+        # Find the name for display purposes
+        match = next((b for b in all_allowed_branches if b["id"] == selected_b_id), None)
+        selected_dashboard_branch = match["branch_name"] if match else "Selected Branch"
+    else:
+        selected_dashboard_branch = "All Branches"
 
     # ---------------------------------------------------------------------------
     # BRANCH ANALYTICS TILES (Official /reports/branch-analytics Endpoint)
@@ -475,164 +518,173 @@ with tab_dashboard:
             return "£0.00"
 
     analytics_data = None
-    if selected_dashboard_branch != "All Branches":
-        # Find the ID for the selected branch
-        selected_b_id = next((b["id"] for b in all_allowed_branches if b["branch_name"] == selected_dashboard_branch), None)
+    if selected_display != "All Branches":
         if selected_b_id:
-            with st.spinner("Fetching analytical data..."):
+            with st.spinner(f"Fetching data for ID {selected_b_id}..."):
                 analytics_raw = get_branch_analytics(selected_b_id)
-                if analytics_raw and isinstance(analytics_raw, list) and len(analytics_raw) > 0:
-                    analytics_data = analytics_raw[0]
-
-            if analytics_data:
-                st.subheader(f"🚀 {selected_dashboard_branch} Insights")
-                
-                # Sample Fields: Lifetime_sales, Lifetime_expense, Lifetime_profit, Last_month_profit, Last_week_profit, Average_Weekly_Profit, Average_Monthly_Profit
-                
-                # Row 1: Consolidated Lifetime Overview
-                col_main, col_date = st.columns([3, 1])
-                with col_main:
-                    st.markdown(f'''
-                        <div class="metric-tile" style="border-left: 5px solid #27ae60;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <h6 style="color: #7f8c8d; margin-bottom: 5px;">LIFETIME OPERATIONAL OVERVIEW</h6>
-                                    <h2 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Lifetime_sales"))}</h2>
-                                    <p style="font-size: 0.9rem; color: #95a5a6; margin-top: 5px;">Total Gross Revenue</p>
-                                </div>
-                                <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 20px;">
-                                    <div style="margin-bottom: 15px;">
-                                        <h4 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Lifetime_expense"))}</h4>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-weight: normal;">Total Expenses</h6>
-                                    </div>
-                                    <div>
-                                        <h4 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Lifetime_profit"))}</h4>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-weight: normal;">Net Profit</h6>
-                                    </div>
-                                </div>
+                if analytics_raw and isinstance(analytics_raw, list):
+                    # API returns a list, find the one matching our requested ID
+                    analytics_data = next((b for b in analytics_raw if b.get("Branch_id") == selected_b_id), None)
+                    
+                    if not analytics_data and len(analytics_raw) > 0:
+                        # Fallback try lowercase or numeric string if needed
+                        analytics_data = next((b for b in analytics_raw if str(b.get("branch_id")) == str(selected_b_id)), None)
+                        
+                    if not analytics_data:
+                        st.error(f"❌ Branch ID {selected_b_id} not found in the returned payload.")
+                else:
+                    st.error(f"❌ API returned EMPTY or invalid format for Branch ID {selected_b_id}")
+        else:
+            st.error(f"❌ Branch ID Resolution Failed for selection: '{selected_display}'")
+    
+    if analytics_data:
+        st.subheader(f"🚀 {selected_dashboard_branch} Insights")
+        st.info(f"📍 ACTIVE: Showing data for Branch ID {selected_b_id} | Ref Date: {analytics_data.get('Date', 'N/A')}")
+        
+        # Sample Fields: Lifetime_sales, Lifetime_expense, Lifetime_profit, Last_month_profit, Last_week_profit, Average_Weekly_Profit, Average_Monthly_Profit
+        
+        # Row 1: Consolidated Lifetime Overview
+        col_main, col_date = st.columns([3, 1])
+        with col_main:
+            st.markdown(f'''
+                <div class="metric-tile" style="border-left: 5px solid #27ae60;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h6 style="color: #7f8c8d; margin-bottom: 5px;">LIFETIME OPERATIONAL OVERVIEW</h6>
+                            <h2 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Lifetime_sales"))}</h2>
+                            <p style="font-size: 0.9rem; color: #95a5a6; margin-top: 5px;">Total Gross Revenue</p>
+                        </div>
+                        <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 20px;">
+                            <div style="margin-bottom: 15px;">
+                                <h4 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Lifetime_expense"))}</h4>
+                                <h6 style="margin: 0; color: #bdc3c7; font-weight: normal;">Total Expenses</h6>
+                            </div>
+                            <div>
+                                <h4 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Lifetime_profit"))}</h4>
+                                <h6 style="margin: 0; color: #bdc3c7; font-weight: normal;">Net Profit</h6>
                             </div>
                         </div>
-                    ''', unsafe_allow_html=True)
-                with col_date:
-                    st.markdown(f'<div class="metric-tile"><h3>{analytics_data.get("Date", "N/A")}</h3><h6>Report Last Sync Date</h6></div>', unsafe_allow_html=True)
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+        with col_date:
+            st.markdown(f'<div class="metric-tile"><h3>{analytics_data.get("Date", "N/A")}</h3><h6>Report Last Sync Date</h6></div>', unsafe_allow_html=True)
 
-                # Row 2: Monthly & Weekly Performance (Similar Style)
-                st.write("")
-                col_monthly, col_weekly = st.columns(2)
-                
-                # Performance Calculation Helper
-                def calc_perf_pct(current, average):
-                    try:
-                        curr = float(current or 0)
-                        avg = float(average or 1) # avoid div by zero
-                        if avg == 0: return 0.0
-                        return ((curr - avg) / abs(avg)) * 100
-                    except:
-                        return 0.0
+        # Row 2: Monthly & Weekly Performance (Similar Style)
+        st.write("")
+        col_monthly, col_weekly = st.columns(2)
+        
+        # Performance Calculation Helper
+        def calc_perf_pct(current, average):
+            try:
+                curr = float(current or 0)
+                avg = float(average or 1) # avoid div by zero
+                if avg == 0: return 0.0
+                return ((curr - avg) / abs(avg)) * 100
+            except:
+                return 0.0
 
-                with col_monthly:
-                    mo_perf = calc_perf_pct(analytics_data.get("Last_month_profit"), analytics_data.get("Average_Monthly_Profit"))
-                    mo_color = "#27ae60" if mo_perf >= 0 else "#e74c3c"
-                    mo_icon = "&uarr;" if mo_perf >= 0 else "&darr;"
-                    
-                    st.markdown(f'''
-                        <div class="metric-tile" style="border-left: 5px solid #3498db;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <h6 style="color: #7f8c8d; margin-bottom: 5px;">LAST MONTH SUMMARY</h6>
-                                    <h3 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Last_month_sales"))}</h3>
-                                    <p style="font-size: 0.8rem; color: #95a5a6; margin-top: 5px;">Monthly Sales</p>
-                                </div>
-                                <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 15px;">
-                                    <div style="margin-bottom: 8px;">
-                                        <h5 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Last_month_expense"))}</h5>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Expenses</h6>
-                                    </div>
-                                    <div>
-                                        <h5 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Last_month_profit"))}</h5>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Net Profit</h6>
-                                    </div>
-                                </div>
+        with col_monthly:
+            mo_perf = calc_perf_pct(analytics_data.get("Last_month_profit"), analytics_data.get("Average_Monthly_Profit"))
+            mo_color = "#27ae60" if mo_perf >= 0 else "#e74c3c"
+            mo_icon = "&uarr;" if mo_perf >= 0 else "&darr;"
+            
+            st.markdown(f'''
+                <div class="metric-tile" style="border-left: 5px solid #3498db;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h6 style="color: #7f8c8d; margin-bottom: 5px;">LAST MONTH SUMMARY</h6>
+                            <h3 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Last_month_sales"))}</h3>
+                            <p style="font-size: 0.8rem; color: #95a5a6; margin-top: 5px;">Monthly Sales</p>
+                        </div>
+                        <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 15px;">
+                            <div style="margin-bottom: 8px;">
+                                <h5 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Last_month_expense"))}</h5>
+                                <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Expenses</h6>
                             </div>
-                            <div style="margin-top: 10px; border-top: 1px dashed #ecf0f1; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                <span style="font-size: 0.75rem; color: #7f8c8d;">Avg Profit: <b>{format_currency(analytics_data.get("Average_Monthly_Profit"))}</b></span>
-                                <span style="font-size: 1.1rem; color: {mo_color}; font-weight: bold;">{mo_icon} <span style="font-size: 0.85rem;">{abs(mo_perf):.1f}% Performance</span></span>
+                            <div>
+                                <h5 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Last_month_profit"))}</h5>
+                                <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Net Profit</h6>
                             </div>
                         </div>
-                    ''', unsafe_allow_html=True)
+                    </div>
+                    <div style="margin-top: 10px; border-top: 1px dashed #ecf0f1; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.75rem; color: #7f8c8d;">Avg Profit: <b>{format_currency(analytics_data.get("Average_Monthly_Profit"))}</b></span>
+                        <span style="font-size: 1.1rem; color: {mo_color}; font-weight: bold;">{mo_icon} <span style="font-size: 0.85rem;">{abs(mo_perf):.1f}% Performance</span></span>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
 
-                with col_weekly:
-                    wk_perf = calc_perf_pct(analytics_data.get("Last_week_profit"), analytics_data.get("Average_Weekly_Profit"))
-                    wk_color = "#27ae60" if wk_perf >= 0 else "#e74c3c"
-                    wk_icon = "&uarr;" if wk_perf >= 0 else "&darr;"
-                    
-                    st.markdown(f'''
-                        <div class="metric-tile" style="border-left: 5px solid #f1c40f;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <h6 style="color: #7f8c8d; margin-bottom: 5px;">LAST WEEK SUMMARY</h6>
-                                    <h3 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Last_week_sales"))}</h3>
-                                    <p style="font-size: 0.8rem; color: #95a5a6; margin-top: 5px;">Weekly Sales</p>
-                                </div>
-                                <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 15px;">
-                                    <div style="margin-bottom: 8px;">
-                                        <h5 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Last_week_expense"))}</h5>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Expenses</h6>
-                                    </div>
-                                    <div>
-                                        <h5 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Last_week_profit"))}</h5>
-                                        <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Net Profit</h6>
-                                    </div>
-                                </div>
+        with col_weekly:
+            wk_perf = calc_perf_pct(analytics_data.get("Last_week_profit"), analytics_data.get("Average_Weekly_Profit"))
+            wk_color = "#27ae60" if wk_perf >= 0 else "#e74c3c"
+            wk_icon = "&uarr;" if wk_perf >= 0 else "&darr;"
+            
+            st.markdown(f'''
+                <div class="metric-tile" style="border-left: 5px solid #f1c40f;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h6 style="color: #7f8c8d; margin-bottom: 5px;">LAST WEEK SUMMARY</h6>
+                            <h3 style="margin: 0; color: #2c3e50;">{format_currency(analytics_data.get("Last_week_sales"))}</h3>
+                            <p style="font-size: 0.8rem; color: #95a5a6; margin-top: 5px;">Weekly Sales</p>
+                        </div>
+                        <div style="text-align: right; border-left: 1px solid #ecf0f1; padding-left: 15px;">
+                            <div style="margin-bottom: 8px;">
+                                <h5 style="margin: 0; color: #e74c3c;">{format_currency(analytics_data.get("Last_week_expense"))}</h5>
+                                <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Expenses</h6>
                             </div>
-                            <div style="margin-top: 10px; border-top: 1px dashed #ecf0f1; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                <span style="font-size: 0.75rem; color: #7f8c8d;">Avg Profit: <b>{format_currency(analytics_data.get("Average_Weekly_Profit"))}</b></span>
-                                <span style="font-size: 1.1rem; color: {wk_color}; font-weight: bold;">{wk_icon} <span style="font-size: 0.85rem;">{abs(wk_perf):.1f}% Performance</span></span>
+                            <div>
+                                <h5 style="margin: 0; color: #27ae60;">{format_currency(analytics_data.get("Last_week_profit"))}</h5>
+                                <h6 style="margin: 0; color: #bdc3c7; font-size: 0.7rem; font-weight: normal;">Net Profit</h6>
                             </div>
                         </div>
-                    ''', unsafe_allow_html=True)
-                
-                # --- Weekday vs Weekend Sales Comparison ---
-                
-                # --- Weekday vs Weekend Sales Comparison ---
-                st.write("")
-                st.subheader("📅 Sales Distribution: Weekdays vs. Weekends")
-                
-                dist_col1, dist_col2 = st.columns(2)
-                
-                with dist_col1:
-                    # Last Week Distribution
-                    wk_labels = ["Weekdays", "Weekend"]
-                    wk_values = [analytics_data.get("Last_week_sales_weekdays", 0), analytics_data.get("Last_week_sales_weekend", 0)]
-                    
-                    fig_wk_dist = px.pie(
-                        names=wk_labels,
-                        values=wk_values,
-                        title="Last Week Sales Split",
-                        color_discrete_sequence=["#34495e", "#f39c12"],
-                        hole=0.5
-                    )
-                    fig_wk_dist.update_layout(height=350, margin=dict(t=40, b=40, l=10, r=10))
-                    st.plotly_chart(fig_wk_dist, use_container_width=True)
+                    </div>
+                    <div style="margin-top: 10px; border-top: 1px dashed #ecf0f1; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.75rem; color: #7f8c8d;">Avg Profit: <b>{format_currency(analytics_data.get("Average_Weekly_Profit"))}</b></span>
+                        <span style="font-size: 1.1rem; color: {wk_color}; font-weight: bold;">{wk_icon} <span style="font-size: 0.85rem;">{abs(wk_perf):.1f}% Performance</span></span>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+        
+        # --- Weekday vs Weekend Sales Comparison ---
+        st.write("")
+        st.subheader("📅 Sales Distribution: Weekdays vs. Weekends")
+        
+        dist_col1, dist_col2 = st.columns(2)
+        
+        with dist_col1:
+            # Last Week Distribution
+            wk_labels = ["Weekdays", "Weekend"]
+            wk_values = [analytics_data.get("Last_week_sales_weekdays", 0), analytics_data.get("Last_week_sales_weekend", 0)]
+            
+            fig_wk_dist = px.pie(
+                names=wk_labels,
+                values=wk_values,
+                title="Last Week Sales Split",
+                color_discrete_sequence=["#34495e", "#f39c12"],
+                hole=0.5
+            )
+            fig_wk_dist.update_layout(height=350, margin=dict(t=40, b=40, l=10, r=10))
+            st.plotly_chart(fig_wk_dist, use_container_width=True)
 
-                with dist_col2:
-                    # Last Month Distribution
-                    mo_labels = ["Weekdays", "Weekend"]
-                    mo_values = [analytics_data.get("Last_month_sales_weekdays", 0), analytics_data.get("Last_month_sales_weekend", 0)]
-                    
-                    fig_mo_dist = px.pie(
-                        names=mo_labels,
-                        values=mo_values,
-                        title="Last Month Sales Split",
-                        color_discrete_sequence=["#2c3e50", "#e67e22"],
-                        hole=0.5
-                    )
-                    fig_mo_dist.update_layout(height=350, margin=dict(t=40, b=40, l=10, r=10))
-                    st.plotly_chart(fig_mo_dist, use_container_width=True)
+        with dist_col2:
+            # Last Month Distribution
+            mo_labels = ["Weekdays", "Weekend"]
+            mo_values = [analytics_data.get("Last_month_sales_weekdays", 0), analytics_data.get("Last_month_sales_weekend", 0)]
+            
+            fig_mo_dist = px.pie(
+                names=mo_labels,
+                values=mo_values,
+                title="Last Month Sales Split",
+                color_discrete_sequence=["#2c3e50", "#e67e22"],
+                hole=0.5
+            )
+            fig_mo_dist.update_layout(height=350, margin=dict(t=40, b=40, l=10, r=10))
+            st.plotly_chart(fig_mo_dist, use_container_width=True)
 
-                st.divider()
-            else:
-                st.warning("⚠️ Could not load official analytical KPIs for this branch. Please check selection.")
+        st.divider()
+    else:
+        st.warning("⚠️ Could not load official analytical KPIs for this branch. Please check selection.")
 
     # Show list of all branches for high-level overview if "All Branches" selected
     if selected_dashboard_branch == "All Branches" and all_allowed_branches:
@@ -648,21 +700,25 @@ with tab_monthly:
         st.warning("No branches available.")
     else:
         # Use Global Branch selection
-        global_sel = st.session_state.get("global_branch_filter", "All Branches")
-        if global_sel == "All Branches":
-            st.info("ℹ️ Analyzing **first available branch** (Global filter set to All Branches)")
+        global_display = st.session_state.get("global_branch_filter", "All Branches")
+        sel_b_id = extract_branch_id(global_display)
+        
+        if not sel_b_id:
+            # Fallback for "All Branches" or failed extraction
+            st.info("📊 **Consolidated View (Aggregated data summary pending)** - Showing first available branch: **" + live_branches[0]["branch_name"] + "**")
             sel_b_name = live_branches[0]["branch_name"]
             sel_b_id = live_branches[0]["id"]
         else:
-            sel_b_name = global_sel
-            sel_b_id = next((b["id"] for b in live_branches if b["branch_name"] == global_sel), live_branches[0]["id"])
+            match = next((b for b in live_branches if b["id"] == sel_b_id), None)
+            sel_b_name = match["branch_name"] if match else "Selected Branch"
             
         m_col1, m_col2 = st.columns([8, 2])
         with m_col1:
-            st.subheader(f"📊 Market Trend & Profitability: {sel_b_name}")
+            st.subheader(f"📊 Market Trend & Profitability: {sel_b_name} (ID: {sel_b_id})")
         with m_col2:
             if st.button("🔄 Refresh Data", key="refresh_monthly", use_container_width=True):
-                get_branch_monthly_performance.clear()
+                try: get_branch_monthly_performance.clear()
+                except: pass
                 st.rerun()
 
         # --- Sales API Logic ---
@@ -675,6 +731,17 @@ with tab_monthly:
             st.stop()
 
         raw_df = pd.DataFrame(api_data)
+        
+        # --- Filter by Selected Branch (API returns multi-branch payload) ---
+        if not raw_df.empty:
+            # Check for 'Branch_id' or 'branch_id'
+            id_col = next((c for c in raw_df.columns if c.lower() == "branch_id"), None)
+            if id_col:
+                raw_df = raw_df[raw_df[id_col] == sel_b_id].copy()
+            
+        if raw_df.empty:
+            st.warning(f"⚠️ No data entries found for Branch ID {sel_b_id} in the monthly report.")
+            st.stop()
         
         # --- 1. Mapping & Normalization ---
         month_names = {
@@ -874,22 +941,28 @@ with tab_weekly:
         st.warning("No branches available.")
     else:
         # Use Global Branch selection
-        global_sel = st.session_state.get("global_branch_filter", "All Branches")
-        if global_sel == "All Branches":
-            st.info("ℹ️ Analyzing **first available branch** (Global filter set to All Branches)")
+        global_display = st.session_state.get("global_branch_filter", "All Branches")
+        if global_display == "All Branches":
+            st.info("📊 **Consolidated View (Aggregated data summary pending)** - Showing first available branch: **" + live_branches[0]["branch_name"] + "**")
             sel_b_name = live_branches[0]["branch_name"]
             sel_b_id = live_branches[0]["id"]
         else:
-            sel_b_name = global_sel
-            sel_b_id = next((b["id"] for b in live_branches if b["branch_name"] == global_sel), live_branches[0]["id"])
+            match = next((b for b in live_branches if f"{b['branch_name']} (ID: {b['id']})" == global_display), None)
+            if match:
+                sel_b_name = match['branch_name']
+                sel_b_id = match['id']
+            else:
+                sel_b_name = live_branches[0]["branch_name"]
+                sel_b_id = live_branches[0]["id"]
             
         w_col1, w_col2 = st.columns([8, 2])
         with w_col1:
-            st.subheader(f"📊 Weekly Market Trend: {sel_b_name}")
+            st.subheader(f"📊 Weekly Market Trend: {sel_b_name} (ID: {sel_b_id})")
         with w_col2:
             if st.button("🔄 Refresh Data", key="refresh_weekly", use_container_width=True):
                 from services.api_client import get_branch_weekly_performance
-                get_branch_weekly_performance.clear()
+                try: get_branch_weekly_performance.clear()
+                except: pass
                 st.rerun()
 
         # --- Fetch Data ---
@@ -901,6 +974,16 @@ with tab_weekly:
             st.stop()
 
         df_w = pd.DataFrame(weekly_api_data)
+        
+        # --- Filter by Selected Branch (API returns multi-branch payload) ---
+        if not df_w.empty:
+            id_col = next((c for c in df_w.columns if c.lower() == "branch_id"), None)
+            if id_col:
+                df_w = df_w[df_w[id_col] == sel_b_id].copy()
+                
+        if df_w.empty:
+            st.warning(f"⚠️ No data entries found for Branch ID {sel_b_id} in the weekly report.")
+            st.stop()
         # --- Weekly Performance Logic ---
         # Mapping for human-readable labels
         w_map = {
@@ -1204,10 +1287,18 @@ with tab_accounts:
     else:
         col_gl1, col_gl2 = st.columns([2, 1])
         with col_gl1:
-            # Branch Selector for GL
-            b_map = {b["branch_name"]: b["id"] for b in live_branches}
-            sel_b_name = st.selectbox("🎯 Select Branch to View Ledger", options=list(b_map.keys()), key="gl_branch_selector")
-            sel_b_id = b_map[sel_b_name]
+            # Respect Global Branch Selector
+            global_display = st.session_state.get("global_branch_filter", "All Branches")
+            sel_b_id = extract_branch_id(global_display)
+            
+            if not sel_b_id:
+                sel_b_name = live_branches[0]["branch_name"]
+                sel_b_id = live_branches[0]["id"]
+                st.info(f"Showing Ledger for first branch: **{sel_b_name}** (Global Filter: All Branches)")
+            else:
+                match = next((b for b in live_branches if b["id"] == sel_b_id), None)
+                sel_b_name = match["branch_name"] if match else "Selected Branch"
+                st.success(f"Viewing Ledger for: **{sel_b_name}**")
         with col_gl2:
             uploaded_gl = st.file_uploader("Upload GL Data CSV/Override", type=["csv", "tsv", "txt"], label_visibility="collapsed")
             if st.button("🚀 Fetch Ledger from API", use_container_width=True):
@@ -1289,9 +1380,23 @@ with tab_flow1:
     if not all_branches_flow:
         st.warning("No branches available to display in Flow 1.")
     else:
-        branch_map_flow = {b["branch_name"]: b["id"] for b in all_branches_flow}
-        selected_name_flow = st.selectbox("🎯 Select Branch", options=list(branch_map_flow.keys()), key="flow1_branch_selector")
-        selected_id_flow = branch_map_flow[selected_name_flow]
+        # Respect Global Branch Selector
+        global_display = st.session_state.get("global_branch_filter", "All Branches")
+        sel_b_id_flow = extract_branch_id(global_display)
+        
+        if not sel_b_id_flow:
+            selected_name_flow = all_branches_flow[0]["branch_name"]
+            selected_id_flow = all_branches_flow[0]["id"]
+            st.info(f"Flow 1: Showing first branch: **{selected_name_flow}** (Global Filter: All Branches)")
+        else:
+            match = next((b for b in all_branches_flow if b["id"] == sel_b_id_flow), None)
+            if match:
+                selected_name_flow = match['branch_name']
+                selected_id_flow = match['id']
+            else:
+                selected_name_flow = all_branches_flow[0]["branch_name"]
+                selected_id_flow = all_branches_flow[0]["id"]
+            st.success(f"Flow 1 Active for: **{selected_name_flow}**")
         
         st.divider()
         
@@ -1300,7 +1405,13 @@ with tab_flow1:
         
         with col_kpi:
             st.subheader("📊 Performance KPIs")
-            kpi_data = get_branch_performance(selected_id_flow)
+            kpi_raw = get_branch_performance(selected_id_flow)
+            kpi_data = None
+            if isinstance(kpi_raw, list):
+                kpi_data = next((k for k in kpi_raw if k.get("Branch_id") == selected_id_flow or k.get("branch_id") == selected_id_flow), None)
+            elif isinstance(kpi_raw, dict):
+                kpi_data = kpi_raw
+
             if kpi_data:
                 # Display metrics if key-value pairs exist
                 if isinstance(kpi_data, dict):
@@ -1321,7 +1432,13 @@ with tab_flow1:
             st.subheader("💸 Expenses")
             exp_list = get_expenses(selected_id_flow)
             if exp_list and isinstance(exp_list, list):
+                # Filter by branch if needed (though expenses usually come filtered)
                 exp_df = pd.DataFrame(exp_list)
+                if not exp_df.empty and "branch_id" in exp_df.columns:
+                    exp_df = exp_df[exp_df["branch_id"] == selected_id_flow]
+                elif not exp_df.empty and "Branch_id" in exp_df.columns:
+                    exp_df = exp_df[exp_df["Branch_id"] == selected_id_flow]
+                
                 if not exp_df.empty:
                     st.dataframe(
                         exp_df,
