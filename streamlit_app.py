@@ -872,6 +872,74 @@ with tab_monthly:
             else:
                 st.info("No online channel data found for platform analysis.")
                 
+        # --- YoY Seasonal Analysis ---
+        st.divider()
+        st.subheader("📈 Seasonal Analysis & YoY Growth")
+        
+        # Ensure we have data for analysis
+        if not raw_df.empty and "Year" in raw_df.columns and "month_text" in raw_df.columns:
+            yoy_col1, yoy_col2 = st.columns([7, 3])
+            
+            with yoy_col1:
+                st.markdown("#### 6️⃣ Monthly Sales Trend by Year")
+                yoy_line_df = raw_df.copy()
+                
+                # Identify the correct revenue column (Total_Revenue seems to be the one)
+                rev_col = "Total_Revenue" if "Total_Revenue" in yoy_line_df.columns else "Total_Sales"
+                
+                # Ensure correct month sorting
+                month_order = list(month_names.values())
+                
+                fig_yoy_sales = px.line(
+                    yoy_line_df, 
+                    x="month_text", 
+                    y=rev_col, 
+                    color="Year",
+                    markers=True,
+                    category_orders={"month_text": month_order},
+                    title="Sales Comparison: Year over Year",
+                    labels={"month_text": "Month", rev_col: "Total Sales (£)", "Year": "Year"},
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig_yoy_sales.update_layout(xaxis={'categoryorder':'array', 'categoryarray':month_order})
+                st.plotly_chart(fig_yoy_sales, use_container_width=True)
+            
+            with yoy_col2:
+                st.markdown("#### 7️⃣ YoY Growth Table")
+                # Pivot to get Years as columns and Months as rows
+                growth_pivot = raw_df.pivot_table(
+                    index="month_text", 
+                    columns="Year", 
+                    values=rev_col, 
+                    aggfunc="sum"
+                ).reindex(month_order)
+                
+                years_avail = sorted(growth_pivot.columns.tolist())
+                if len(years_avail) > 1:
+                    # Calculate growth between last two available years
+                    latest_yr = years_avail[-1]
+                    prev_yr = years_avail[-2]
+                    
+                    growth_df = growth_pivot[[prev_yr, latest_yr]].copy()
+                    growth_df["Growth %"] = ((growth_df[latest_yr] - growth_df[prev_yr]) / growth_df[prev_yr].replace(0, 1)) * 100
+                    
+                    st.write(f"Comparing **{latest_yr}** vs **{prev_yr}**")
+                    
+                    def style_growth(val):
+                        if pd.isna(val): return ""
+                        color = "#27ae60" if val > 0 else "#e74c3c"
+                        return f"color: {color}; font-weight: bold;"
+
+                    st.dataframe(
+                        growth_df.style.format({latest_yr: "£{:,.0f}", prev_yr: "£{:,.0f}", "Growth %": "{:,.1f}%"})
+                        .applymap(style_growth, subset=["Growth %"]),
+                        use_container_width=True
+                    )
+                else:
+                    st.info("YoY growth requires at least two years of data.")
+        else:
+            st.info("Insufficient data for seasonal analysis.")
+
         # --- Tabular Report View ---
         st.divider()
         st.subheader("📋 Monthly Performance Data (Tabular)")
