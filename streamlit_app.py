@@ -1,4 +1,9 @@
+import sys
 import os
+
+# Ensure the root directory is in python's path for robust import resolution across all environments
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
