@@ -936,9 +936,15 @@ with tab_monthly:
                         color = "#27ae60" if val > 0 else "#e74c3c"
                         return f"color: {color}; font-weight: bold;"
 
+                    # Handle both older and newer versions of pandas Styler (map was introduced in 2.1.0 to replace applymap)
+                    styler = growth_df.style.format({latest_yr: "£{:,.0f}", prev_yr: "£{:,.0f}", "Growth %": "{:,.1f}%"})
+                    if hasattr(styler, "map"):
+                        styler = styler.map(style_growth, subset=["Growth %"])
+                    else:
+                        styler = styler.applymap(style_growth, subset=["Growth %"])
+
                     st.dataframe(
-                        growth_df.style.format({latest_yr: "£{:,.0f}", prev_yr: "£{:,.0f}", "Growth %": "{:,.1f}%"})
-                        .applymap(style_growth, subset=["Growth %"]),
+                        styler,
                         use_container_width=True
                     )
                 else:
