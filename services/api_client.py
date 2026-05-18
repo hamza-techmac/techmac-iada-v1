@@ -382,6 +382,47 @@ def create_channel(channel_name: str, description: str = None) -> dict | None:
     return res
 
 
+# --- Weekly Expenses Processing ---
+def process_weekly_expenses(
+    monday_date: str,
+    branch_id: int,
+    COS: float = 0.0,
+    COL: float = 0.0,
+    Admin: float = 0.0,
+    Marketing_Deliveroo: float = 0.0,
+    Marketing_Uber: float = 0.0,
+    Marketing_JE: float = 0.0,
+    Marketing_Google: float = 0.0,
+    Marketing_Fb_Tiktok: float = 0.0,
+) -> dict | None:
+    """
+    POST weekly expense data to /expenses/process-weekly.
+    Returns the response dict on success, or None on failure.
+    """
+    body = {
+        "monday_date": monday_date,       # "YYYY-MM-DD" string
+        "branch_id": branch_id,
+        "COS": round(float(COS), 2),
+        "COL": round(float(COL), 2),
+        "Admin": round(float(Admin), 2),
+        "Marketing_Deliveroo": round(float(Marketing_Deliveroo), 2),
+        "Marketing_Uber": round(float(Marketing_Uber), 2),
+        "Marketing_JE": round(float(Marketing_JE), 2),
+        "Marketing_Google": round(float(Marketing_Google), 2),
+        "Marketing_Fb_Tiktok": round(float(Marketing_Fb_Tiktok), 2),
+    }
+    result = _post("/expenses/process-weekly", body)
+    if result:
+        # Invalidate caches that depend on expense/sales data
+        try:
+            get_branch_analytics.clear()
+            get_branch_weekly_performance.clear()
+            get_branch_monthly_performance.clear()
+        except Exception:
+            pass
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Lookup helpers
 # ---------------------------------------------------------------------------
