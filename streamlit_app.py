@@ -10,7 +10,8 @@ from services.api_client import (
     get_franchises, get_cities, create_branch, create_channel, create_city, create_franchise,
     update_branch, delete_branch, update_franchise, delete_franchise, create_expense,
     get_channel_monthly, get_weekly_segmented, get_monthly_expenses, get_chart_of_accounts,
-    get_expenses, get_branch_performance, get_branch_analytics, get_branch_monthly_performance
+    get_expenses, get_branch_performance, get_branch_analytics, get_branch_monthly_performance,
+    process_weekly_expenses
 )
 
 st.set_page_config(layout="wide", initial_sidebar_state="collapsed", page_title="IADA Executive Dashboard")
@@ -326,8 +327,8 @@ st.divider()
 
 st.divider()
 
-tab_dashboard, tab_monthly, tab_weekly, tab_entry, tab_accounts, tab_franchise, tab_admin, tab_flow1 = st.tabs([
-    "Dashboard", "Monthly Analysis", "Weekly Analysis", "Data Entry", "Accounts", "Franchise & Branches", "Admin Management", "Flow 1"
+tab_dashboard, tab_monthly, tab_weekly, tab_entry, tab_accounts, tab_franchise, tab_admin, tab_flow1, tab_add_expenses = st.tabs([
+    "Dashboard", "Monthly Analysis", "Weekly Analysis", "Data Entry", "Accounts", "Franchise & Branches", "Admin Management", "Flow 1", "Add Expenses"
 ])
 
 with tab_franchise:
@@ -1523,6 +1524,85 @@ with tab_flow1:
                     st.info("Expense list is empty for this branch.")
             else:
                 st.info("No expense records found from API.")
+
+with tab_add_expenses:
+    st.header("📝 Submit Weekly Expenses")
+
+    from datetime import date, timedelta, datetime
+    
+    global_display = st.session_state.get("global_branch_filter", "All Branches")
+    form_branch_id = extract_branch_id(global_display)
+    
+    if not form_branch_id:
+        st.warning("⚠️ Please select a specific branch from the 'Filter Branch' dropdown at the top to submit expenses.")
+    else:
+        today = date.today()
+        default_monday = today - timedelta(days=today.weekday())
+        last_date_str = "No prior expenses recorded"
+        
+        # Fetch latest expense date
+        branch_expenses = get_expenses(form_branch_id)
+        if branch_expenses and isinstance(branch_expenses, list) and len(branch_expenses) > 0:
+            import pandas as pd
+            df_exp = pd.DataFrame(branch_expenses)
+            if 'date_key' in df_exp.columns:
+                max_date_key = df_exp['date_key'].max()
+                try:
+                    date_str = str(int(max_date_key))
+                    last_date = datetime.strptime(date_str, "%Y%m%d").date()
+                    # Default to the next Monday after the last recorded one
+                    default_monday = last_date + timedelta(days=7)
+                    last_date_str = last_date.strftime('%Y-%m-%d (Monday)')
+                except Exception:
+                    pass
+        
+        st.info(f"📅 **Last Expense Update for this Branch:** {last_date_str}")
+
+        with st.form("weekly_expense_form"):
+            monday_date = st.date_input("Week Starting (Monday) for new entry", value=default_monday)
+
+            st.markdown("#### 💰 Operational Expenses")
+            e1, e2, e3, e4 = st.columns(4)
+            COS   = e1.number_input("Cost of Sales (COS)", min_value=0.0, value=0.0, step=10.0)
+            COL   = e2.number_input("Cost of Labour (COL)", min_value=0.0, value=0.0, step=10.0)
+            Admin = e3.number_input("Admin Expenses",       min_value=0.0, value=0.0, step=10.0)
+
+            st.markdown("#### 📢 Marketing Spend")
+            m1, m2, m3, m4 = st.columns(4)
+            mkt_deliveroo = m1.number_input("Deliveroo Mkt",  min_value=0.0, value=0.0, step=5.0)
+            mkt_uber      = m2.number_input("Uber Mkt",       min_value=0.0, value=0.0, step=5.0)
+            mkt_je        = m3.number_input("Just Eat Mkt",   min_value=0.0, value=0.0, step=5.0)
+            mkt_google    = m4.number_input("Google Ads",      min_value=0.0, value=0.0, step=5.0)
+            
+            m5, m6, m7, m8 = st.columns(4)
+            mkt_fb_tiktok = m5.number_input("FB / TikTok Ads", min_value=0.0, value=0.0, step=5.0)
+
+            submitted = st.form_submit_button("🚀 Submit Weekly Data")
+
+        if submitted:
+            # Validate Monday
+            if monday_date.weekday() != 0:
+                st.error("❌ The selected date must be a Monday!")
+            else:
+                with st.spinner("Processing weekly expenses..."):
+                    result = process_weekly_expenses(
+                        monday_date=str(monday_date),
+                        branch_id=form_branch_id,
+                        COS=COS, COL=COL, Admin=Admin,
+                        Marketing_Deliveroo=mkt_deliveroo,
+                        Marketing_Uber=mkt_uber,
+                        Marketing_JE=mkt_je,
+                        Marketing_Google=mkt_google,
+                        Marketing_Fb_Tiktok=mkt_fb_tiktok,
+                    )
+                    if result and result.get("status") == "success":
+                        st.success("✅ Weekly expenses processed successfully!")
+                        # Optionally clear cache so the UI updates
+                        import time
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to process weekly expenses.")
 
 # --- GLOBAL FOOTER ---
 st.markdown("""
